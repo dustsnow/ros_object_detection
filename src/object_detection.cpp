@@ -20,13 +20,27 @@ static const char WINDOW[] = "Image Processed";
 //Use method of ImageTransport to create image publisher
 image_transport::Publisher pub;
 
+//giant red circle 
+int LowerH = 160;
+int LowerS = 52;
+int LowerV = 139;
+int UpperH = 180;
+int UpperS = 196;
+int UpperV = 170;
+int HoughCirclesParam1 = 200;
+int HoughCirclesParam2 = 50;
+int HC_Param1 = 200;
+int HC_Param2 = 63;
+int HL_Threshold = 90;
+int HL_MinLineLength = 1;
+
 void objectDetectionCallback(const sensor_msgs::ImageConstPtr& original_image){
 	cv_bridge::CvImagePtr cv_ptr;
 	try
     {
         //Always copy, returning a mutable CvImage
         //OpenCV expects color images to use BGR channel order.
-        cv_ptr = cv_bridge::toCvCopy(original_image, enc::MONO8);
+        cv_ptr = cv_bridge::toCvCopy(original_image, enc::BGR8);
     }
     catch (cv_bridge::Exception& e)
     {
@@ -35,42 +49,39 @@ void objectDetectionCallback(const sensor_msgs::ImageConstPtr& original_image){
         return;
     }
 	
+	//Color Detection
 	cv::Mat img_hsv,img_mask;
-	inRange(cv_ptr->image, cv::Scalar(36,0,0), cv::Scalar(146,256,256),img_mask);
+	cv::cvtColor(cv_ptr->image,img_hsv,CV_BGR2HSV);
+	inRange(img_hsv, cv::Scalar(LowerH,LowerS,LowerV), cv::Scalar(UpperH,UpperS,UpperV),img_mask);
 	
 	//Circle Detection
 	GaussianBlur(img_mask, img_mask, cv::Size(9,9),2,2);
 	std::vector<cv::Vec3f> circles;
-	HoughCircles(img_mask, circles, CV_HOUGH_GRADIENT,1,img_mask.rows/8,200,60,0,0);
+	HoughCircles(img_mask, circles, CV_HOUGH_GRADIENT,1,img_mask.rows/8,HC_Param1,HC_Param2,0,0);
 	//Line Detection
 	cv::Mat dst;
-	Canny(img_mask,dst,50,200,3);
-	std::vector<cv::Vec2f> lines;
-	HoughLines(dst,lines,1,CV_PI/180,160,0,0);
+	cv::Canny(img_mask,dst,10,200,3);
+	cv::vector<cv::Vec4i> lines;
+	HoughLinesP(dst, lines, 1, CV_PI/180, HL_Threshold, HL_MinLineLength, 40 );
 
-    for( size_t i = 0; i < lines.size(); i++ )
-    {
-        float rho = lines[i][0], theta = lines[i][1];
-        cv::Point pt1, pt2;
-        double a = cos(theta), b = sin(theta);
-        double x0 = a*rho, y0 = b*rho;
-        pt1.x = cvRound(x0 + 1000*(-b));
-        pt1.y = cvRound(y0 + 1000*(a));
-        pt2.x = cvRound(x0 - 1000*(-b));
-        pt2.y = cvRound(y0 - 1000*(a));
-        line( img_mask, pt1, pt2, cv::Scalar(0,255,0), 3, CV_AA);
-    }
+	for( size_t i = 0; i < lines.size(); i++ )
+    	{
+    		cv::line( cv_ptr->image, cv::Point(lines[i][0], lines[i][1]),
+            cv::Point(lines[i][2], lines[i][3]), cv::Scalar(0,255,0), 3, 8 );
+    	}
 
     for( size_t i = 0; i < circles.size(); i++ )
     {
         cv::Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
         int radius = cvRound(circles[i][2]);
         // circle center
-        circle( img_mask, center, 3, cv::Scalar(0,255,0), -1, 8, 0 );
+        circle( cv_ptr->image, center, 3, cv::Scalar(0,255,0), -1, 8, 0 );
         // circle outline
-        circle( img_mask, center, radius, cv::Scalar(0,255,0), 3, 8, 0 );
+        circle( cv_ptr->image, center, radius, cv::Scalar(0,255,0), 3, 8, 0 );
     }
+
     cv::imshow(WINDOW, img_mask);
+	cv::imshow("Processed", cv_ptr->image);
 	cv::waitKey(3);
 
     //Convert the CvImage to a ROS image message and publish it on the "camera/image_processed" topic.
@@ -181,6 +192,17 @@ int main(int argc, char **argv)
     ros::NodeHandle nh;
     //Create an ImageTransport instance, initializing it with our NodeHandle.
     image_transport::ImageTransport it(nh);
+
+	cv::namedWindow("Ball");
+	cv::createTrackbar("LowerH","Ball",&LowerH,180,NULL);
+	cv::createTrackbar("UpperH","Ball",&UpperH,180,NULL);
+	cv::createTrackbar("LowerS","Ball",&LowerS,256,NULL);
+	cv::createTrackbar("UpperS","Ball",&UpperS,256,NULL);
+	cv::createTrackbar("LowerV","Ball",&LowerV,256,NULL);
+	cv::createTrackbar("UpperV","Ball",&UpperV,256,NULL);
+	cv::createTrackbar("HoughCirclesParam1","Ball",&HoughCirclesParam1,256,NULL);
+	cv::createTrackbar("HoughCirclesParam2","Ball",&HoughCirclesParam2,256,NULL);
+
     //OpenCV HighGUI call to create a display window on start-up.
     cv::namedWindow(WINDOW, CV_WINDOW_AUTOSIZE);
     /**
